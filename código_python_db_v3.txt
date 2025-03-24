@@ -1,0 +1,169 @@
+import dash
+from dash import dcc, html, Input, Output
+import plotly.express as px
+import pandas as pd
+import dash_bootstrap_components as dbc
+import spacy
+
+# Carregar o modelo de processamento de linguagem natural
+nlp = spacy.load("en_core_web_sm")
+
+# Carregar os dados
+data = pd.read_excel("fake_name_generator_db.xlsx", sheet_name="Worksheet")
+
+# Inicializar o aplicativo Dash
+app = dash.Dash(
+    __name__, 
+    external_stylesheets=[
+        dbc.themes.DARKLY,
+        "https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Roboto:wght@400;700&display=swap"  # Fontes Poppins e Roboto
+    ]
+)
+
+# Layout do dashboard
+app.layout = dbc.Container([
+    html.H1("Concessionária - Dashboard", className="text-center mb-4 text-light", style={"font-family": "Poppins, sans-serif"}),
+
+    dbc.Row([
+        dbc.Col(dcc.Input(
+            id='input-filtro',
+            type='text',
+            placeholder='Pesquise por cidade, estado ou veículo...',
+            debounce=True,
+            className='form-control mb-3',
+            style={"font-family": "Poppins, sans-serif"}
+        ), width=12)
+    ]),
+
+    dbc.Row([
+        dbc.Col(dcc.Graph(id='carros-mais-vendidos', config={'displayModeBar': False}), width=6),
+        dbc.Col(dcc.Graph(id='clientes-por-localizacao', config={'displayModeBar': False}), width=6)
+    ]),
+
+    dbc.Row([
+        dbc.Col(dcc.Graph(id='vendas-por-estado', config={'displayModeBar': False}), width=6),
+        dbc.Col(dcc.Graph(id='marcas-populares', config={'displayModeBar': False}), width=6)
+    ]),
+
+    dbc.Row([
+        dbc.Col(dcc.Graph(id='cidades-fieis', config={'displayModeBar': False}), width=6),
+        dbc.Col(dcc.Graph(id='diversidade-veiculos', config={'displayModeBar': False}), width=6)
+    ])
+], fluid=True, className="bg-dark p-4")
+
+# Função para interpretar a entrada do usuário
+def interpretar_pergunta(pergunta):
+    doc = nlp(pergunta.lower())
+    filtros = {"estado": None, "cidade": None, "veiculos": None}
+    
+    estados_set = set(data['State'].str.lower().unique())
+    cidades_set = set(data['City'].str.lower().unique())
+    veiculos_set = set(data['Vehicle'].str.lower().unique())
+    
+    for token in doc:
+        if token.text in estados_set:
+            filtros['estado'] = token.text
+        if token.text in cidades_set:
+            filtros['cidade'] = token.text
+        if token.text in veiculos_set:
+            filtros['veiculos'] = token.text
+    
+    return filtros
+
+# Callback para atualizar os gráficos
+@app.callback(
+    [
+        Output('carros-mais-vendidos', 'figure'),
+        Output('clientes-por-localizacao', 'figure'),
+        Output('vendas-por-estado', 'figure'),
+        Output('marcas-populares', 'figure'),
+        Output('cidades-fieis', 'figure'),
+        Output('diversidade-veiculos', 'figure')
+    ],
+    [Input('input-filtro', 'value')]
+)
+def update_graphs(filtro):
+    filtros = interpretar_pergunta(filtro) if filtro else {}
+    data_filtrada = data
+    
+    if filtros.get('estado'):
+        data_filtrada = data_filtrada[data_filtrada['State'].str.lower().str.contains(filtros['estado'])]
+    if filtros.get('cidade'):
+        data_filtrada = data_filtrada[data_filtrada['City'].str.lower().str.contains(filtros['cidade'])]
+    if filtros.get('veiculos'):
+        data_filtrada = data_filtrada[data_filtrada['Vehicle'].str.lower().str.contains(filtros['veiculos'])]
+    
+    top_carros = data_filtrada['Vehicle'].value_counts().nlargest(10)
+    fig_carros = px.bar(
+        x=top_carros.values, 
+        y=top_carros.index,
+        labels={'x': 'Quantidade Vendida', 'y': 'Modelo'},
+        title='Top 10: Carros Mais Vendidos',
+        template='plotly_dark',
+        text_auto=True,
+        orientation='h'
+    )
+    fig_carros.update_traces(marker_color='cyan', marker_line_width=1.5)
+    fig_carros.update_layout(title_font_family="Roboto")  # Fonte Roboto
+
+    clientes_localizacao = data_filtrada['City'].value_counts().nlargest(10)
+    fig_clientes = px.bar(
+        x=clientes_localizacao.values,
+        y=clientes_localizacao.index,
+        labels={'x': 'Número de Clientes', 'y': 'Cidade'},
+        title='Clientes por Localização',
+        template='plotly_dark',
+        text_auto=True,
+        orientation='h'
+    )
+    fig_clientes.update_layout(title_font_family="Roboto")  # Fonte Roboto
+
+    vendas_estados = data_filtrada['State'].value_counts()
+    fig_estado = px.bar(
+        x=vendas_estados.values,
+        y=vendas_estados.index,
+        labels={'x': 'Carros Vendidos', 'y': 'Estados'},
+        title='Estados Mais Frequentes',
+        template='plotly_dark',
+        text_auto=True,
+        orientation='h'
+    )
+    fig_estado.update_layout(title_font_family="Roboto")  # Fonte Roboto
+
+    marcas = data_filtrada['Vehicle'].apply(lambda x: x.split()[0] if len(x.split()) > 0 else x).value_counts().sort_values()
+    fig_marcas = px.bar(
+        x=marcas.values,
+        y=marcas.index,
+        labels={'x': 'Quantidade Vendida', 'y': 'Marca'},
+        title='Marcas Populares (Ordem Crescente)',
+        template='plotly_dark',
+        text_auto=True,
+        orientation='h'
+    )
+    fig_marcas.update_layout(title_font_family="Roboto")  # Fonte Roboto
+
+    cidades_fieis = data_filtrada['City'].value_counts().nlargest(10)
+    fig_cidades = px.bar(
+        x=cidades_fieis.values,
+        y=cidades_fieis.index,
+        labels={'x': 'Número de Clientes', 'y': 'Cidade'},
+        title='Cidades com Clientes Fiéis',
+        template='plotly_dark',
+        text_auto=True,
+        orientation='h'
+    )
+    fig_cidades.update_layout(title_font_family="Roboto")  # Fonte Roboto
+
+    diversidade_veiculos = data_filtrada['Vehicle'].nunique()
+    fig_diversidade = px.pie(
+        names=['Variados', 'Repetidos'],
+        values=[diversidade_veiculos, len(data_filtrada) - diversidade_veiculos],
+        title='Diversidade de Veículos',
+        template='plotly_dark'
+    )
+    fig_diversidade.update_layout(title_font_family="Roboto")  # Fonte Roboto
+
+    return fig_carros, fig_clientes, fig_estado, fig_marcas, fig_cidades, fig_diversidade
+
+if __name__ == '__main__':
+    app.run(debug=True)
