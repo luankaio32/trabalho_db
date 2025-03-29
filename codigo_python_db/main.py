@@ -13,7 +13,7 @@ app = dash.Dash(
     __name__, 
     external_stylesheets=[
         dbc.themes.DARKLY,
-        "https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Roboto:wght@400;700&display=swap"  # Fontes Poppins e Roboto
+        "https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Roboto:wght@400;700&display=swap"  
     ]
 )
 
@@ -24,11 +24,25 @@ app.layout = dbc.Container([
         dbc.Col(dcc.Input(
             id='input-filtro',
             type='text',
-            placeholder='Pesquise por cidade, estado ou veículo...',
+            placeholder='Pesquise por cidade ou estado...',
             debounce=True,
             className='form-control mb-3',
             style={"font-family": "Poppins, sans-serif"}
-        ), width=12)
+        ), width=6),
+        dbc.Col(dcc.Dropdown(
+            id='filtro-genero',
+            options=[{'label': genero, 'value': genero} for genero in data['Gender'].unique()],
+            placeholder='Selecione o gênero',
+            className='mb-3'
+        ), width=3),
+        dbc.Col(dcc.RangeSlider(
+            id='filtro-idade',
+            min=data['Age'].min(),
+            max=data['Age'].max(),
+            step=1,
+            marks={i: str(i) for i in range(data['Age'].min(), data['Age'].max()+1, 10)},
+            tooltip={"placement": "bottom", "always_visible": True}
+        ), width=3)
     ]),
 
     dbc.Row([
@@ -42,7 +56,6 @@ app.layout = dbc.Container([
     ]),
 
     dbc.Row([
-        dbc.Col(dcc.Graph(id='cidades-fieis', config={'displayModeBar': False}), width=6),
         dbc.Col(dcc.Graph(id='diversidade-veiculos', config={'displayModeBar': False}), width=6)
     ])
 ], 
@@ -55,46 +68,34 @@ app.layout = dbc.Container([
     }
 )
 
-def interpretar_pergunta(pergunta):
-    doc = nlp(pergunta.lower())
-    filtros = {"estado": None, "cidade": None, "veiculos": None}
-    
-    estados_set = set(data['State'].str.lower().unique())
-    cidades_set = set(data['City'].str.lower().unique())
-    veiculos_set = set(data['Vehicle'].str.lower().unique())
-    
-    for token in doc:
-        if token.text in estados_set:
-            filtros['estado'] = token.text
-        if token.text in cidades_set:
-            filtros['cidade'] = token.text
-        if token.text in veiculos_set:
-            filtros['veiculos'] = token.text
-    
-    return filtros
-
 @app.callback(
     [
         Output('carros-mais-vendidos', 'figure'),
         Output('clientes-por-localizacao', 'figure'),
         Output('vendas-por-estado', 'figure'),
         Output('marcas-populares', 'figure'),
-        Output('cidades-fieis', 'figure'),
         Output('diversidade-veiculos', 'figure')
     ],
-    [Input('input-filtro', 'value')]
+    [
+        Input('input-filtro', 'value'),
+        Input('filtro-genero', 'value'),
+        Input('filtro-idade', 'value')
+    ]
 )
-def update_graphs(filtro):
-    filtros = interpretar_pergunta(filtro) if filtro else {}
+def update_graphs(filtro, genero, idade_range):
     data_filtrada = data
+
+    if filtro:
+        filtro_lower = filtro.lower()
+        data_filtrada = data_filtrada[data_filtrada['City'].str.lower().str.contains(filtro_lower) |
+                                      data_filtrada['State'].str.lower().str.contains(filtro_lower)]
     
-    if filtros.get('estado'):
-        data_filtrada = data_filtrada[data_filtrada['State'].str.lower().str.contains(filtros['estado'])]
-    if filtros.get('cidade'):
-        data_filtrada = data_filtrada[data_filtrada['City'].str.lower().str.contains(filtros['cidade'])]
-    if filtros.get('veiculos'):
-        data_filtrada = data_filtrada[data_filtrada['Vehicle'].str.lower().str.contains(filtros['veiculos'])]
-    
+    if genero:
+        data_filtrada = data_filtrada[data_filtrada['Gender'] == genero]
+
+    if idade_range:
+        data_filtrada = data_filtrada[(data_filtrada['Age'] >= idade_range[0]) & (data_filtrada['Age'] <= idade_range[1])]
+
     top_carros = data_filtrada['Vehicle'].value_counts().nlargest(10)
     fig_carros = px.bar(
         x=top_carros.values, 
@@ -144,18 +145,6 @@ def update_graphs(filtro):
     )
     fig_marcas.update_layout(title_font_family="Roboto")
 
-    cidades_fieis = data_filtrada['City'].value_counts().nlargest(10)
-    fig_cidades = px.bar(
-        x=cidades_fieis.values,
-        y=cidades_fieis.index,
-        labels={'x': 'Número de Clientes', 'y': 'Cidade'},
-        title='Cidades com Clientes Fiéis',
-        template='plotly_dark',
-        text_auto=True,
-        orientation='h'
-    )
-    fig_cidades.update_layout(title_font_family="Roboto")
-
     diversidade_veiculos = data_filtrada['Vehicle'].nunique()
     fig_diversidade = px.pie(
         names=['Variados', 'Repetidos'],
@@ -165,8 +154,7 @@ def update_graphs(filtro):
     )
     fig_diversidade.update_layout(title_font_family="Roboto")
 
-    return fig_carros, fig_clientes, fig_estado, fig_marcas, fig_cidades, fig_diversidade
+    return fig_carros, fig_clientes, fig_estado, fig_marcas, fig_diversidade
 
 if __name__ == '__main__':
     app.run(debug=True)
-
